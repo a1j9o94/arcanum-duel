@@ -1,0 +1,269 @@
+.game-board {
+  width: 100vw;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1a0033 0%, #330066 50%, #1a0033 100%);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem;
+  gap: 0.5rem;
+  position: relative;
+}
+
+/* Fields */
+.field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid rgba(212, 175, 55, 0.3);
+  border-radius: 8px;
+}
+
+.enemy-field {
+  background: linear-gradient(180deg, rgba(139, 0, 0, 0.2) 0%, rgba(0, 0, 0, 0.3) 100%);
+}
+
+.player-field {
+  background: linear-gradient(0deg, rgba(0, 100, 139, 0.2) 0%, rgba(0, 0, 0, 0.3) 100%);
+}
+
+/* Champion Area */
+.champion-area {
+  padding: 0.5rem;
+}
+
+.champion-portrait {
+  background: linear-gradient(135deg, #2d1b4e 0%, #1a0a33 100%);
+  border: 3px solid #d4af37;
+  border-radius: 12px;
+  padding: 1rem;
+  max-width: 400px;
+  margin: 0 auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.champion-portrait.winner {
+  border-color: #ffd700;
+  box-shadow: 0 0 30px rgba(255, 215, 0, 0.6), 0 0 60px rgba(255, 215, 0, 0.4);
+  animation: victory-pulse 1.5s infinite;
+}
+
+@keyframes victory-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.champion-name {
+  font-size: 1.3rem;
+  font-weight: bold;
+  color: #ffd700;
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+.hp-bar {
+  position: relative;
+  height: 24px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 2px solid #d4af37;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 0.5rem;
+}
+
+.hp-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #8b0000 0%, #dc143c 100%);
+  transition: width 0.3s;
+}
+
+.hp-fill.player {
+  background: linear-gradient(90deg, #00688b 0%, #1e90ff 100%);
+}
+
+.hp-text {
+  position: relative;
+  color: #fff;
+  font-weight: bold;
+  line-height: 24px;
+  text-shadow: 0 0 4px #000, 0 0 8px #000;
+  display: block;
+  text-align: center;
+}
+
+.stats {
+  color: #c9b899;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.champion-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  justify-content: center;
+}
+
+.hero-power-btn,
+.self-attack-btn {
+  font-size: 0.85rem;
+  padding: 0.4em 0.8em;
+}
+
+/* Spirit Row */
+.spirit-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  min-height: 180px;
+  align-items: center;
+}
+
+.spirit-row > div {
+  transition: transform 0.2s;
+}
+
+.spirit-row > div.selected {
+  transform: scale(1.1);
+  filter: drop-shadow(0 0 10px #ffd700);
+}
+
+.spirit-row > div.targetable {
+  cursor: pointer;
+  animation: pulse-target 1s infinite;
+}
+
+@keyframes pulse-target {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.3) drop-shadow(0 0 8px #ffd700); }
+}
+
+/* Action Log */
+.action-log {
+  position: fixed;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 200px;
+  background: rgba(0, 0, 0, 0.8);
+  border: 2px solid #d4af37;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.action-log h3 {
+  color: #ffd700;
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+  text-align: center;
+}
+
+.log-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.log-entry {
+  font-size: 0.75rem;
+  color: #c9b899;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+  padding-bottom: 0.3rem;
+}
+
+/* Hand */
+.hand {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.5);
+  border: 2px solid rgba(212, 175, 55, 0.3);
+  border-radius: 8px;
+  overflow-x: auto;
+  max-width: 100%;
+  justify-content: center;
+}
+
+.hand-card {
+  cursor: pointer;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.hand-card.playable:hover {
+  transform: translateY(-10px);
+}
+
+.hand-card.unplayable {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hand-card.selected {
+  transform: translateY(-10px) scale(1.05);
+  filter: drop-shadow(0 0 10px #ffd700);
+}
+
+/* Controls */
+.controls {
+  padding: 1rem;
+  background: rgba(0, 0, 0, 0.5);
+  border: 2px solid rgba(212, 175, 55, 0.3);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.phase-indicator {
+  font-size: 1.2rem;
+  color: #ffd700;
+  margin-bottom: 0.5rem;
+  font-weight: bold;
+}
+
+.target-hint {
+  background: rgba(138, 43, 226, 0.3);
+  border: 2px solid #8a2be2;
+  border-radius: 6px;
+  padding: 0.5rem;
+  margin: 0.5rem 0;
+  color: #e6d9ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.button-row {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin-top: 0.5rem;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+  .action-log {
+    position: static;
+    transform: none;
+    width: 100%;
+    margin: 0.5rem 0;
+  }
+
+  .champion-actions {
+    flex-direction: column;
+  }
+
+  .spirit-row {
+    min-height: 150px;
+  }
+
+  .hand {
+    justify-content: flex-start;
+  }
+}
