@@ -1,6 +1,6 @@
 import type { ChampionData } from './types';
 
-export const CHAMPIONS: Record<string, ChampionData> = {
+export const CHAMPION_TEMPLATES: Record<string, ChampionData> = {
   swarmMaster: {
     id: 'ezra',
     name: 'Ezra the Swarmlord',

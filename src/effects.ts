@@ -1,6 +1,6 @@
 import type { GameState, CardData } from './types';
 import type { Action } from './actions';
-import { generateCardId } from './cardTemplates';
+import { createCardInstance } from './instance';
 
 // ─── Effect Types ────────────────────────────────────────────
 
@@ -77,8 +77,7 @@ export const HERO_POWER_EFFECTS: Record<string, HeroPowerEffect> = {
       actions.push({
         type: 'SUMMON_TOKEN',
         playerId,
-        card: {
-          id: generateCardId(),
+        card: createCardInstance({
           name: 'Mite',
           type: 'Spirit',
           tier: 'Mite',
@@ -90,7 +89,7 @@ export const HERO_POWER_EFFECTS: Record<string, HeroPowerEffect> = {
           summoningSick: true,
           canAttack: false,
           stunned: false,
-        },
+        }),
       });
     }
     return actions;

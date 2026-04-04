@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import type { GameState } from '../types';
-import { initGame, playCard, attackWithSpirit, endTurn, aiTurn, useHeroPower, canPlayCard, championSelfAttack } from '../gameLogic';
+import { useReducer, useState, useEffect, useMemo } from 'react';
+import { reducer } from '../reducer';
+import { initGameState } from '../init';
+import { aiDecide } from '../engine/ai';
 import CardComponent from './Card';
 import './GameBoard.css';
 
@@ -11,90 +12,73 @@ interface GameBoardProps {
 
 type TargetMode = 'none' | 'spell' | 'equipment' | 'attack' | 'heropower';
 
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
+
 export default function GameBoard({ archetype, onReturn }: GameBoardProps) {
-  const [game, setGame] = useState<GameState>(() => initGame(archetype));
+  const [state, dispatch] = useReducer(reducer, archetype, initGameState);
   const [selectedCard, setSelectedCard] = useState<number | null>(null);
   const [selectedSpirit, setSelectedSpirit] = useState<string | null>(null);
   const [targetMode, setTargetMode] = useState<TargetMode>('none');
   const [isAiTurn, setIsAiTurn] = useState(false);
 
-  const currentPlayer = game.players[game.currentPlayer];
-  const opponent = game.players[1 - game.currentPlayer];
+  const { players, currentPlayer, winner, turn, phase, log } = state;
+  const player = players[0];
+  const opponent = players[1];
 
-  // AI turn automation
   useEffect(() => {
-    if (game.currentPlayer === 1 && !game.winner && !isAiTurn) {
-      setIsAiTurn(true);
-      setTimeout(() => {
-        setGame(prev => {
-          const newGame = JSON.parse(JSON.stringify(prev));
-          aiTurn(newGame);
-          return newGame;
-        });
+    if (currentPlayer === 1 && !winner && !isAiTurn) {
+      const runAiTurn = async () => {
+        setIsAiTurn(true);
+        await delay(500);
+        const actions = aiDecide(state);
+        for (const action of actions) {
+          dispatch(action);
+          await delay(400);
+        }
         setIsAiTurn(false);
-      }, 1000);
+      };
+      runAiTurn();
     }
-  }, [game.currentPlayer, game.winner, isAiTurn]);
+  }, [currentPlayer, winner, isAiTurn, state]);
+
+  const canPlayCard = useMemo(() => {
+    return (cardIndex: number) => {
+      const card = player.hand[cardIndex];
+      if (!card) return false;
+      if(player.champion.archetype === 'Blood Pact') {
+          return player.willpower >= card.cost || player.champion.hp > (card.cost - player.willpower) * 2
+      }
+      return player.willpower >= card.cost;
+    }
+  }, [player.willpower, player.hand, player.champion]);
 
   const handlePlayCard = (cardIndex: number) => {
-    const card = currentPlayer.hand[cardIndex];
-    if (!card || !canPlayCard(game, game.currentPlayer, card)) return;
-
-    if (card.type === 'Incantation' && (card.name === 'Banishment' || card.name === 'Soul Drain')) {
+    if (!canPlayCard(cardIndex)) return;
+    const card = player.hand[cardIndex];
+    if (card.requiresTarget) {
       setSelectedCard(cardIndex);
-      setTargetMode('spell');
-    } else if (card.type === 'Equipment') {
-      setSelectedCard(cardIndex);
-      setTargetMode('equipment');
+      setTargetMode(card.type === 'Equipment' ? 'equipment' : 'spell');
     } else {
-      setGame(prev => {
-        const newGame = JSON.parse(JSON.stringify(prev));
-        playCard(newGame, game.currentPlayer, cardIndex);
-        return newGame;
-      });
+      dispatch({ type: 'PLAY_CARD', playerId: 0, cardIndex });
     }
   };
 
-  const handleTargetSelect = (targetId: string, isEnemy: boolean) => {
-    if (targetMode === 'spell' && selectedCard !== null && isEnemy) {
-      setGame(prev => {
-        const newGame = JSON.parse(JSON.stringify(prev));
-        playCard(newGame, game.currentPlayer, selectedCard, targetId);
-        return newGame;
-      });
-      setSelectedCard(null);
-      setTargetMode('none');
-    } else if (targetMode === 'equipment' && selectedCard !== null && !isEnemy) {
-      setGame(prev => {
-        const newGame = JSON.parse(JSON.stringify(prev));
-        playCard(newGame, game.currentPlayer, selectedCard, targetId);
-        return newGame;
-      });
-      setSelectedCard(null);
-      setTargetMode('none');
-    } else if (targetMode === 'attack' && selectedSpirit && isEnemy) {
-      setGame(prev => {
-        const newGame = JSON.parse(JSON.stringify(prev));
-        attackWithSpirit(newGame, selectedSpirit, targetId);
-        return newGame;
-      });
-      setSelectedSpirit(null);
-      setTargetMode('none');
-    } else if (targetMode === 'heropower' && isEnemy) {
-      setGame(prev => {
-        const newGame = JSON.parse(JSON.stringify(prev));
-        useHeroPower(newGame, game.currentPlayer, targetId);
-        return newGame;
-      });
-      setTargetMode('none');
+  const handleTargetSelect = (targetId: string) => {
+    if (selectedCard !== null) {
+      dispatch({ type: 'PLAY_CARD', playerId: 0, cardIndex: selectedCard, targetId });
+    } else if (selectedSpirit !== null) {
+      dispatch({ type: 'ATTACK', attackerId: selectedSpirit, targetId });
+    } else if (targetMode === 'heropower') {
+      dispatch({ type: 'USE_HERO_POWER', playerId: 0, targetId });
     }
+    cancelTarget();
   };
 
   const handleSpiritClick = (spiritId: string, isEnemy: boolean) => {
-    if (targetMode !== 'none') {
-      handleTargetSelect(spiritId, isEnemy);
-    } else if (!isEnemy && game.currentPlayer === 0) {
-      const spirit = currentPlayer.field.find(s => s.id === spiritId);
+    if ((isEnemy && (targetMode === 'spell' || targetMode === 'attack' || targetMode === 'heropower')) || (!isEnemy && targetMode === 'equipment')) {
+      handleTargetSelect(spiritId);
+    } else if (!isEnemy && currentPlayer === 0) {
+      const spirit = player.field.find(s => s.id === spiritId);
       if (spirit?.canAttack && !spirit.stunned) {
         setSelectedSpirit(spiritId);
         setTargetMode('attack');
@@ -102,48 +86,22 @@ export default function GameBoard({ archetype, onReturn }: GameBoardProps) {
     }
   };
 
-  const handleAttackChampion = () => {
-    if (selectedSpirit && targetMode === 'attack') {
-      setGame(prev => {
-        const newGame = JSON.parse(JSON.stringify(prev));
-        attackWithSpirit(newGame, selectedSpirit);
-        return newGame;
-      });
-      setSelectedSpirit(null);
-      setTargetMode('none');
-    }
-  };
+  const handleChampionClick = (isEnemy: boolean) => {
+      if(isEnemy && targetMode === 'attack') {
+          handleTargetSelect('champion');
+      }
+  }
 
   const handleEndTurn = () => {
-    setGame(prev => {
-      const newGame = JSON.parse(JSON.stringify(prev));
-      endTurn(newGame);
-      return newGame;
-    });
-    setSelectedCard(null);
-    setSelectedSpirit(null);
-    setTargetMode('none');
+    dispatch({ type: 'END_TURN' });
+    cancelTarget();
   };
 
   const handleHeroPower = () => {
-    if (currentPlayer.champion.heroPower.name === 'Binding Circle') {
+    if (player.champion.heroPower.requiresTarget) {
       setTargetMode('heropower');
     } else {
-      setGame(prev => {
-        const newGame = JSON.parse(JSON.stringify(prev));
-        useHeroPower(newGame, game.currentPlayer);
-        return newGame;
-      });
-    }
-  };
-
-  const handleChampionAttack = () => {
-    if (game.currentPlayer === 0) {
-      setGame(prev => {
-        const newGame = JSON.parse(JSON.stringify(prev));
-        championSelfAttack(newGame, game.currentPlayer);
-        return newGame;
-      });
+      dispatch({ type: 'USE_HERO_POWER', playerId: 0 });
     }
   };
 
@@ -153,12 +111,14 @@ export default function GameBoard({ archetype, onReturn }: GameBoardProps) {
     setTargetMode('none');
   };
 
+  if(!player) return <div>Loading...</div>
+
   return (
     <div className="game-board">
       {/* Enemy Field */}
       <div className="field enemy-field">
-        <div className="champion-area">
-          <div className={`champion-portrait ${game.winner === 1 ? 'winner' : ''}`}>
+        <div className="champion-area" onClick={() => handleChampionClick(true)}>
+          <div className={`champion-portrait ${winner === 1 ? 'winner' : ''} ${targetMode === 'attack' ? 'targetable': ''}`}>
             <div className="champion-name">{opponent.champion.name}</div>
             <div className="hp-bar">
               <div
@@ -188,7 +148,7 @@ export default function GameBoard({ archetype, onReturn }: GameBoardProps) {
       <div className="action-log">
         <h3>Log</h3>
         <div className="log-entries">
-          {game.log.slice(-5).map((entry, i) => (
+          {log.slice(-5).map((entry, i) => (
             <div key={i} className="log-entry">{entry}</div>
           ))}
         </div>
@@ -197,7 +157,7 @@ export default function GameBoard({ archetype, onReturn }: GameBoardProps) {
       {/* Player Field */}
       <div className="field player-field">
         <div className="spirit-row">
-          {currentPlayer.field.map(spirit => (
+          {player.field.map(spirit => (
             <div
               key={spirit.id}
               onClick={() => handleSpiritClick(spirit.id, false)}
@@ -208,31 +168,24 @@ export default function GameBoard({ archetype, onReturn }: GameBoardProps) {
           ))}
         </div>
 
-        <div className="champion-area">
-          <div className={`champion-portrait ${game.winner === 0 ? 'winner' : ''}`}>
-            <div className="champion-name">{currentPlayer.champion.name}</div>
+        <div className="champion-area" onClick={() => handleChampionClick(false)}>
+          <div className={`champion-portrait ${winner === 0 ? 'winner' : ''}`}>
+            <div className="champion-name">{player.champion.name}</div>
             <div className="hp-bar">
               <div
                 className="hp-fill player"
-                style={{ width: `${(currentPlayer.champion.hp / currentPlayer.champion.maxHp) * 100}%` }}
+                style={{ width: `${(player.champion.hp / player.champion.maxHp) * 100}%` }}
               />
-              <span className="hp-text">{currentPlayer.champion.hp}/{currentPlayer.champion.maxHp}</span>
+              <span className="hp-text">{player.champion.hp}/{player.champion.maxHp}</span>
             </div>
-            <div className="stats">ATK: {currentPlayer.champion.atk} | WP: {currentPlayer.willpower}/{currentPlayer.maxWillpower}</div>
+            <div className="stats">ATK: {player.champion.atk} | WP: {player.willpower}/{player.maxWillpower}</div>
             <div className="champion-actions">
               <button
                 onClick={handleHeroPower}
-                disabled={game.currentPlayer !== 0 || currentPlayer.willpower < currentPlayer.champion.heroPower.cost}
+                disabled={currentPlayer !== 0 || player.willpower < player.champion.heroPower.cost || player.heroPowerUsed}
                 className="hero-power-btn"
               >
-                {currentPlayer.champion.heroPower.name}
-              </button>
-              <button
-                onClick={handleChampionAttack}
-                disabled={game.currentPlayer !== 0}
-                className="self-attack-btn"
-              >
-                Self-Attack
+                {player.champion.heroPower.name}
               </button>
             </div>
           </div>
@@ -241,11 +194,11 @@ export default function GameBoard({ archetype, onReturn }: GameBoardProps) {
 
       {/* Hand */}
       <div className="hand">
-        {currentPlayer.hand.map((card, i) => (
+        {player.hand.map((card, i) => (
           <div
-            key={card.id}
-            onClick={() => game.currentPlayer === 0 && handlePlayCard(i)}
-            className={`hand-card ${selectedCard === i ? 'selected' : ''} ${canPlayCard(game, game.currentPlayer, card) ? 'playable' : 'unplayable'}`}
+            key={i}
+            onClick={() => currentPlayer === 0 && handlePlayCard(i)}
+            className={`hand-card ${selectedCard === i ? 'selected' : ''} ${canPlayCard(i) ? 'playable' : 'unplayable'}`}
           >
             <CardComponent card={card} />
           </div>
@@ -255,11 +208,11 @@ export default function GameBoard({ archetype, onReturn }: GameBoardProps) {
       {/* Controls */}
       <div className="controls">
         <div className="phase-indicator">
-          {game.winner ? (
-            <strong>{game.winner === 0 ? 'YOU WIN!' : 'YOU LOSE!'}</strong>
+          {winner !== undefined ? (
+            <strong>{winner === 0 ? 'YOU WIN!' : 'YOU LOSE!'}</strong>
           ) : (
             <>
-              Turn {game.turn} | {game.currentPlayer === 0 ? 'Your Turn' : "AI's Turn"} | {game.phase.toUpperCase()}
+              Turn {turn} | {currentPlayer === 0 ? 'Your Turn' : "AI's Turn"} | {phase.toUpperCase()}
             </>
           )}
         </div>
@@ -268,19 +221,14 @@ export default function GameBoard({ archetype, onReturn }: GameBoardProps) {
           <div className="target-hint">
             {targetMode === 'spell' && 'Select an enemy spirit'}
             {targetMode === 'equipment' && 'Select your spirit to equip'}
-            {targetMode === 'attack' && (
-              <>
-                Select enemy target or{' '}
-                <button onClick={handleAttackChampion}>Attack Champion</button>
-              </>
-            )}
+            {targetMode === 'attack' && 'Select an enemy to attack'}
             {targetMode === 'heropower' && 'Select an enemy spirit to stun'}
             <button onClick={cancelTarget}>Cancel</button>
           </div>
         )}
 
         <div className="button-row">
-          <button onClick={handleEndTurn} disabled={game.currentPlayer !== 0 || game.winner !== undefined}>
+          <button onClick={handleEndTurn} disabled={currentPlayer !== 0 || winner !== undefined}>
             End Turn
           </button>
           <button onClick={onReturn}>Return to Menu</button>

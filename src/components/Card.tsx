@@ -1,4 +1,4 @@
-import type { Card as CardType } from '../types';
+import type { CardData as CardType } from '../types';
 import './Card.css';
 
 interface CardProps {
@@ -55,7 +55,7 @@ export default function Card({ card, inField }: CardProps) {
       {/* Keywords */}
       {card.keywords && card.keywords.length > 0 && (
         <div className="keywords">
-          {card.keywords.map((kw, i) => (
+          {card.keywords.map((kw: string, i: number) => (
             <span key={i} className="keyword">{kw}</span>
           ))}
         </div>

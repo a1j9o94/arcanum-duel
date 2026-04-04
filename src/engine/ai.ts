@@ -1,64 +1,108 @@
 import type { GameState } from '../types';
 import type { Action } from '../actions';
 
-/**
- * Synchronous AI decision function.
- * Given the current GameState (where currentPlayer === 1), returns the FULL sequence
- * of actions the AI wants to take this turn, ending with END_TURN.
- *
- * GameBoard replays these with visual delays (400ms each):
- *   const aiActions = aiDecide(game);
- *   for (const action of aiActions) {
- *     await delay(400);
- *     dispatch(action);
- *   }
- *
- * Strategy (greedy, in priority order):
- *
- * PHASE 1 — Card Play:
- *   1. Play spirits if cost <= willpower (cheapest first, to fill the field)
- *   2. Play incantations if they have a valid target and cost <= willpower
- *      - Banishment: play if enemy has a spirit, target the highest-atk enemy spirit
- *      - Soul Drain: play if enemy has a spirit, target the highest-atk enemy spirit
- *      - Summoning Ritual: always play if willpower allows
- *   3. Play equipment on the highest-atk friendly spirit
- *   4. Play artifacts if willpower allows
- *   5. Repeat until no more cards can be played
- *
- * PHASE 2 — Hero Power:
- *   - Use hero power if NOT already used AND willpower allows (or HP cost for Blood Pact):
- *     - Swarm Master: always use (summons a token)
- *     - Blood Pact: only use if own HP > 5 (avoid self-kill)
- *     - Binder: use if enemy has a spirit that hasn't been stunned yet
- *     - Shaman: use if own HP < maxHp - 3 (healing is useful)
- *
- * PHASE 3 — Attacks:
- *   1. Attack with all available spirits (canAttack === true, not stunned):
- *      - If any enemy spirit has lethal ATK (would kill a friendly next turn), attack it
- *      - Otherwise attack the lowest-HP enemy target (champion or spirit)
- *      - Prefer face damage (champion) if no dangerous threats exist
- *   2. Champion attack: if champion.atk > 0, attack lowest-HP enemy target
- *      (Note: check current game for whether champion attack is supported)
- *
- * PHASE 4 — End Turn:
- *   Always push { type: 'END_TURN' } as the final action.
- *
- * Constraints:
- * - Do NOT mutate state. Read only.
- * - Do NOT use setTimeout or async. Pure sync function.
- * - Do NOT use randomness for targets — use deterministic selection (highest-atk, lowest-hp, etc.)
- * - The returned action array must be safe to replay on state via the reducer in sequence.
- *   (i.e. simulate state changes mentally to avoid impossible actions like playing a card twice)
- */
 export function aiDecide(state: GameState): Action[] {
-  // TODO: implement
-  // Hint: simulate willpower spending as you build the action list
-  // Use a local `willpower` variable starting at state.players[1].willpower
-  // Decrement it as you add card play / hero power actions
   const actions: Action[] = [];
+  const aiPlayerId = state.currentPlayer;
+  if (aiPlayerId !== 1) return [{ type: 'END_TURN' }];
 
-  // ... implement phases 1–4 here ...
+  let availableWillpower = state.players[aiPlayerId].willpower;
+  const aiPlayer = state.players[aiPlayerId];
+  const opponentPlayer = state.players[0];
 
+  // PHASE 1 — Card Play
+  const playableCards = aiPlayer.hand
+    .map((card, index) => ({ card, index }))
+    .filter(({ card }) => card.cost <= availableWillpower)
+    .sort((a, b) => a.card.cost - b.card.cost);
+
+  for (const { card, index } of playableCards) {
+    if (card.cost > availableWillpower) continue;
+
+    let targetId: string | undefined = undefined;
+
+    if (card.requiresTarget) {
+      if (card.type === 'Equipment') {
+        const friendlySpirits = aiPlayer.field.sort((a,b) => (b.atk ?? 0) - (a.atk ?? 0));
+        if (friendlySpirits.length > 0) {
+          targetId = friendlySpirits[0].id;
+        }
+      } else {
+        const enemySpirits = opponentPlayer.field.sort((a,b) => (b.atk ?? 0) - (a.atk ?? 0));
+        if (enemySpirits.length > 0) {
+          targetId = enemySpirits[0].id;
+        } else {
+          // No valid target
+          continue;
+        }
+      }
+    }
+    
+    // Specific logic for some cards
+    if(card.id === 'banishment' && opponentPlayer.field.length === 0) continue;
+    if(card.id === 'soul-drain' && opponentPlayer.field.length === 0) continue;
+
+    actions.push({ type: 'PLAY_CARD', playerId: aiPlayerId, cardIndex: index, targetId });
+    availableWillpower -= card.cost;
+  }
+
+  // PHASE 2 — Hero Power
+  const heroPower = aiPlayer.champion.heroPower;
+  if (!aiPlayer.heroPowerUsed && heroPower.cost <= availableWillpower) {
+    let usePower = false;
+    let targetId: string | undefined = undefined;
+    switch (heroPower.id) {
+      case 'summon-swarm':
+        usePower = true;
+        break;
+      case 'blood-sacrifice':
+        if (aiPlayer.champion.hp > 5) {
+          usePower = true;
+        }
+        break;
+      case 'binding-circle':
+        const validTargets = opponentPlayer.field.filter(s => !s.stunned);
+        if (validTargets.length > 0) {
+          usePower = true;
+          targetId = validTargets.sort((a,b) => (b.atk ?? 0) - (a.atk ?? 0))[0].id;
+        }
+        break;
+      case 'ancestral-heal':
+        if (aiPlayer.champion.hp < aiPlayer.champion.maxHp - 3) {
+          usePower = true;
+        }
+        break;
+    }
+    if (usePower) {
+      actions.push({ type: 'USE_HERO_POWER', playerId: aiPlayerId, targetId });
+      availableWillpower -= heroPower.cost;
+    }
+  }
+
+  // PHASE 3 — Attacks
+  for (const spirit of aiPlayer.field) {
+    if (spirit.canAttack && !spirit.stunned) {
+      // Simple strategy: attack champion if possible, otherwise attack highest attack spirit
+      if (opponentPlayer.field.length === 0) {
+        actions.push({ type: 'ATTACK', attackerId: spirit.id, targetId: 'champion' });
+      } else {
+        const target = opponentPlayer.field.sort((a,b) => (b.atk ?? 0) - (a.atk ?? 0))[0];
+        actions.push({ type: 'ATTACK', attackerId: spirit.id, targetId: target.id });
+      }
+    }
+  }
+
+  // Champion attack
+  if (aiPlayer.champion.atk > 0) {
+     if (opponentPlayer.field.length === 0) {
+        actions.push({ type: 'CHAMPION_ATTACK', attackingPlayerId: aiPlayerId, targetId: 'champion' });
+      } else {
+        const target = opponentPlayer.field.sort((a,b) => (b.hp ?? 0) - (a.hp ?? 0))[0];
+        actions.push({ type: 'CHAMPION_ATTACK', attackingPlayerId: aiPlayerId, targetId: target.id });
+      }
+  }
+
+  // PHASE 4 — End Turn
   actions.push({ type: 'END_TURN' });
   return actions;
 }

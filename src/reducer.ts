@@ -1,133 +1,134 @@
-import type { GameState, CardData } from './types';
+import type { GameState } from './types';
 import type { Action } from './actions';
 import { checkWinner } from './engine/win';
 import { applyDamage, applyHeal, destroySpirit, resolveSpiritAttack, resolveChampionAttack } from './engine/combat';
-import { drawCards, playCard, summonToken } from './engine/cards';
+import { drawCards, prepareCardPlay, summonToken } from './engine/cards';
 import { processTurnEnd, applyHeroPower, stunSpirit } from './engine/turn';
-import { CHAMPION_TEMPLATES } from './championData';
-import { buildDeckForArchetype } from './cardTemplates';
+import { initGameState } from './init';
 
-/**
- * The single source of truth for all game state transitions.
- * (state, action) => GameState — always pure, never mutates.
- *
- * After every DEAL_DAMAGE action, call checkWinner and set state.winner if applicable.
- * After DESTROY_SPIRIT, fire deathrattles and process their returned actions in sequence.
- */
-export function reducer(state: GameState, action: Action): GameState {
-  // TODO: implement
-  // Handle each action type in a switch statement.
-  // Pattern for multi-step actions that produce sub-actions:
-  //   const [newState, sideEffects] = someEngine(state, ...);
-  //   return sideEffects.reduce(reducer, newState);
+function reduce(state: GameState, action: Action): GameState {
+  // Action logging for replays
+  const stateWithLog = { ...state, actionLog: [...(state.actionLog || []), action] };
 
   switch (action.type) {
-    case 'INIT_GAME': {
-      // Initialize a fresh game for the given playerArchetype
-      // Pick a random AI archetype (different from player's)
-      // Build decks, deal 4 cards to each player, set turn=1, currentPlayer=0
-      throw new Error('Not implemented');
-    }
+    case 'INIT_GAME':
+      return initGameState(action.playerArchetype);
 
     case 'PLAY_CARD': {
-      // Validate: card exists, cost <= willpower, it's action.playerId's turn
-      // Call playCard engine function
-      // Reduce side-effect actions through this reducer
-      throw new Error('Not implemented');
+      const { playerId, cardIndex, targetId } = action;
+      if (playerId !== state.currentPlayer) return state;
+
+      const [sideEffects, card, cost] = prepareCardPlay(state, playerId, cardIndex, targetId);
+      if (!card) return state;
+      
+      const player = state.players[playerId];
+
+      // Pay cost & remove card from hand
+      let willpowerCost = cost;
+      let hpCost = 0;
+      if (player.champion.archetype === 'Blood Pact' && player.willpower < cost) {
+          willpowerCost = player.willpower;
+          hpCost = (cost - player.willpower) * 2;
+      }
+      
+      const newHand = player.hand.filter((_, i) => i !== cardIndex);
+      let newState = { ...stateWithLog };
+      
+      newState.players = state.players.map((p, i) => i === playerId ? {
+          ...p,
+          hand: newHand,
+          willpower: p.willpower - willpowerCost,
+          champion: { ...p.champion, hp: p.champion.hp - hpCost }
+      } : p) as [any, any];
+      
+      // Place card on field/artifacts
+      if (card.type === 'Spirit') {
+        const spiritInstance = { ...card, summoningSick: true, canAttack: false };
+        newState.players[playerId].field.push(spiritInstance);
+      } else if (card.type === 'Artifact') {
+        newState.players[playerId].artifacts.push(card);
+      } else if (card.type === 'Equipment' && targetId) {
+         newState.players[playerId].field = newState.players[playerId].field.map(s => {
+             if (s.id !== targetId) return s;
+             return { ...s, equipmentId: card.id, atk: (s.atk ?? 0) + (card.atkBuff ?? 0), hp: (s.hp ?? 0) + (card.hpBuff ?? 0), maxHp: (s.maxHp ?? 0) + (card.hpBuff ?? 0) };
+         });
+      }
+
+      return sideEffects.reduce(reducer, newState);
     }
 
     case 'ATTACK': {
-      // Validate: attacker belongs to currentPlayer, canAttack===true, not stunned
-      // Call resolveSpiritAttack → get actions
-      // Reduce those actions through this reducer
-      throw new Error('Not implemented');
-    }
+      const { attackerId } = action;
+      const player = state.players[state.currentPlayer];
+      const attacker = player.field.find(s => s.id === attackerId);
+      if (!attacker || !attacker.canAttack || attacker.stunned) return state;
 
+      const actions = resolveSpiritAttack(state, state.currentPlayer, action.attackerId, action.targetId);
+      return actions.reduce(reducer, stateWithLog);
+    }
+      
     case 'CHAMPION_ATTACK': {
-      // Validate: it's action.attackingPlayerId's turn
-      // Call resolveChampionAttack → get actions
-      // Reduce those actions through this reducer
-      throw new Error('Not implemented');
+        const actions = resolveChampionAttack(state, action.attackingPlayerId, action.targetId);
+        return actions.reduce(reducer, stateWithLog);
     }
 
     case 'USE_HERO_POWER': {
-      // Validate: player.heroPowerUsed === false, willpower sufficient (or HP available for Blood Pact)
-      // Call applyHeroPower → get [newState, actions]
-      // Reduce actions through this reducer
-      throw new Error('Not implemented');
+      const { playerId, targetId } = action;
+      if (playerId !== state.currentPlayer || state.players[playerId].heroPowerUsed) return state;
+      
+      const [newState, actions] = applyHeroPower(state, playerId, targetId);
+      return actions.reduce(reducer, newState);
     }
 
     case 'END_TURN': {
-      // Call processTurnEnd → get [newState, drawActions]
-      // Reduce drawActions through this reducer
-      // Return final state
-      throw new Error('Not implemented');
+      const [newState, actions] = processTurnEnd(state);
+      const finalState = actions.reduce(reducer, newState);
+      if (finalState.currentPlayer === 1) { // AI's turn
+        return { ...finalState, phase: 'battle' };
+      }
+      return finalState;
     }
 
     case 'DRAW_CARD': {
-      // Call drawCards engine function
-      // Return new state (no winner check needed)
-      throw new Error('Not implemented');
+      return drawCards(stateWithLog, action.playerId, action.count);
     }
 
     case 'DEAL_DAMAGE': {
-      // Call applyDamage → new state
-      // Call checkWinner(newState) → set state.winner if applicable
-      // Return new state
-      throw new Error('Not implemented');
+      const newState = applyDamage(stateWithLog, action.targetId, action.targetPlayer, action.amount, action.isChampion);
+      const winner = checkWinner(newState);
+      if (winner !== undefined) {
+        return { ...newState, winner, phase: 'end' };
+      }
+      return newState;
     }
 
-    case 'HEAL': {
-      // Call applyHeal → return new state
-      throw new Error('Not implemented');
-    }
+    case 'HEAL':
+      return applyHeal(stateWithLog, action.targetId, action.targetPlayer, action.amount, action.isChampion);
 
     case 'DESTROY_SPIRIT': {
-      // Call destroySpirit → [newState, deathrattleActions]
-      // Reduce deathrattleActions through this reducer
-      // Return final state
-      throw new Error('Not implemented');
+      const [newState, deathrattleActions] = destroySpirit(state, action.spiritId, action.ownerPlayerId);
+      return deathrattleActions.reduce(reducer, newState);
     }
+      
+    case 'SUMMON_TOKEN':
+      return summonToken(stateWithLog, action.playerId, action.card);
 
-    case 'SUMMON_TOKEN': {
-      // Call summonToken engine function
-      throw new Error('Not implemented');
-    }
-
-    case 'STUN_SPIRIT': {
-      // Call stunSpirit engine function
-      throw new Error('Not implemented');
-    }
-
+    case 'STUN_SPIRIT':
+      return stunSpirit(stateWithLog, action.spiritId, action.ownerPlayerId);
+      
     case 'GAIN_WILLPOWER': {
-      // Increase player.willpower by amount, capped at player.maxWillpower
-      throw new Error('Not implemented');
+      const { playerId, amount } = action;
+      const players = state.players.map((p, i) => i === playerId ? { ...p, willpower: Math.min(p.maxWillpower, p.willpower + amount) } : p) as [any, any];
+      return { ...stateWithLog, players };
     }
+      
+    case 'AI_TURN':
+      return state; // No-op, handled by GameBoard
 
-    case 'AI_TURN': {
-      // This action is dispatched by GameBoard when it's the AI's turn
-      // The reducer itself does NOT run AI logic here (GameBoard does that)
-      // This is a no-op placeholder — GameBoard drives AI actions individually
+    default:
       return state;
-    }
-
-    default: {
-      return state;
-    }
   }
 }
 
-/**
- * Initializes a fresh GameState for the given playerArchetype.
- * Called as the initializer in GameBoard's useReducer:
- *   const [state, dispatch] = useReducer(reducer, undefined, () => initGameState('Swarm Master'));
- */
-export function initGameState(playerArchetype: string): GameState {
-  // TODO: implement
-  // Pick AI archetype (random, different from player's)
-  // Get champion templates from championData.ts
-  // Build decks from cardTemplates.ts
-  // Deal 4 cards to each player
-  // Return initial GameState with turn=1, currentPlayer=0, willpower=1/1 for both
-  throw new Error('Not implemented');
-}
+// Wrapper to prevent direct export and allow for middleware in the future
+export const reducer = reduce;
