@@ -3,25 +3,30 @@ export type SpiritTier = 'Mite' | 'Imp' | 'Foliot' | 'Djinn' | 'Afrit' | 'Marid'
 export type CardType = 'Spirit' | 'Incantation' | 'Equipment' | 'Artifact';
 export type Archetype = 'Swarm Master' | 'Blood Pact' | 'Binder' | 'Shaman';
 
-export interface Champion {
+export type GamePhase = 'main' | 'battle' | 'end';
+
+export interface ChampionData {
+  id: string;
   name: string;
   archetype: Archetype;
   hp: number;
   maxHp: number;
   atk: number;
   heroPower: {
+    id: string;
     name: string;
     cost: number;
     description: string;
-    effect: (game: GameState, playerId: number) => void;
+    requiresTarget?: boolean;
   };
   passive: {
     name: string;
     description: string;
+    id: string;
   };
 }
 
-export interface Card {
+export interface CardData {
   id: string;
   name: string;
   type: CardType;
@@ -34,9 +39,9 @@ export interface Card {
   keywords?: string[];
   atkBuff?: number;
   hpBuff?: number;
-  effect?: (game: GameState, playerId: number, targetId?: string) => void;
-  deathrattle?: (game: GameState, playerId: number) => void;
-  onEquip?: (game: GameState, playerId: number, targetId: string) => void;
+  requiresTarget?: boolean;
+  hasBattlecry?: boolean;
+  hasDeathrattle?: boolean;
   equipmentId?: string; // for spirits with equipment attached
   summoningSick?: boolean;
   stunned?: boolean;
@@ -44,25 +49,28 @@ export interface Card {
 }
 
 export interface Player {
-  id: number;
-  champion: Champion;
-  deck: Card[];
-  hand: Card[];
-  field: Card[];
-  artifacts: Card[];
+  id: 0 | 1;
+  champion: ChampionData;
+  deck: CardData[];
+  hand: CardData[];
+  field: CardData[];
+  artifacts: CardData[];
   willpower: number;
   maxWillpower: number;
   mergeState?: {
-    spirit: Card;
+    spiritId: string;
     turnsLeft: number;
+    atkBonus: number;
   };
+  heroPowerUsed: boolean;
 }
 
 export interface GameState {
   players: [Player, Player];
-  currentPlayer: number;
-  phase: 'main' | 'battle' | 'end';
+  currentPlayer: 0 | 1;
+  phase: GamePhase;
   turn: number;
-  winner?: number;
+  winner?: 0 | 1;
   log: string[];
+  actionLog?: unknown[];
 }
